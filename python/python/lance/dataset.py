@@ -2886,6 +2886,7 @@ class LanceDataset(pa.dataset.Dataset):
             "IVF_FLAT",
             "IVF_PQ",
             "IVF_SQ",
+            "IVF_TQ",
             "IVF_HNSW_FLAT",
             "IVF_HNSW_PQ",
             "IVF_HNSW_SQ",

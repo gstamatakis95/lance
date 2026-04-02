@@ -137,6 +137,7 @@ pub enum IndexType {
     IvfHnswPq = 105,
     IvfHnswFlat = 106,
     IvfRq = 107,
+    IvfTq = 108,
 }
 
 impl std::fmt::Display for IndexType {
@@ -159,6 +160,7 @@ impl std::fmt::Display for IndexType {
             Self::IvfHnswPq => write!(f, "IVF_HNSW_PQ"),
             Self::IvfHnswFlat => write!(f, "IVF_HNSW_FLAT"),
             Self::IvfRq => write!(f, "IVF_RQ"),
+            Self::IvfTq => write!(f, "IVF_TQ"),
         }
     }
 }
@@ -186,6 +188,7 @@ impl TryFrom<i32> for IndexType {
             v if v == Self::IvfHnswPq as i32 => Ok(Self::IvfHnswPq),
             v if v == Self::IvfHnswFlat as i32 => Ok(Self::IvfHnswFlat),
             v if v == Self::IvfRq as i32 => Ok(Self::IvfRq),
+            v if v == Self::IvfTq as i32 => Ok(Self::IvfTq),
             _ => Err(Error::invalid_input_source(
                 format!("the input value {} is not a valid IndexType", value).into(),
             )),
@@ -209,6 +212,7 @@ impl TryFrom<&str> for IndexType {
             "IVF_SQ" => Ok(Self::IvfSq),
             "IVF_PQ" => Ok(Self::IvfPq),
             "IVF_RQ" => Ok(Self::IvfRq),
+            "IVF_TQ" => Ok(Self::IvfTq),
             "IVF_HNSW_FLAT" => Ok(Self::IvfHnswFlat),
             "IVF_HNSW_SQ" => Ok(Self::IvfHnswSq),
             "IVF_HNSW_PQ" => Ok(Self::IvfHnswPq),
@@ -249,6 +253,7 @@ impl IndexType {
                 | Self::IvfFlat
                 | Self::IvfSq
                 | Self::IvfRq
+                | Self::IvfTq
         )
     }
 
@@ -289,6 +294,7 @@ impl IndexType {
             | Self::IvfHnswPq
             | Self::IvfHnswFlat => VECTOR_INDEX_VERSION as i32,
             Self::IvfRq => IVF_RQ_INDEX_VERSION as i32,
+            Self::IvfTq => IVF_RQ_INDEX_VERSION as i32, // same version level as IVF_RQ
         }
     }
 
@@ -322,6 +328,7 @@ impl IndexType {
             Self::IvfHnswPq,
             Self::IvfHnswFlat,
             Self::IvfRq,
+            Self::IvfTq,
         ]
         .into_iter()
         .map(|index_type| index_type.version() as u32)

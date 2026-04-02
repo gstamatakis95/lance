@@ -26,6 +26,8 @@ use lance_index::optimize::OptimizeOptions;
 use lance_index::progress::{IndexBuildProgress, noop_progress};
 use lance_index::vector::bq::builder::RabitQuantizer;
 use lance_index::vector::bq::{RQBuildParams, RQRotationType};
+use lance_index::vector::turbo::builder::TurboQuantizer;
+use lance_index::vector::turbo::TurboBuildParams;
 use lance_index::vector::flat::index::{FlatBinQuantizer, FlatIndex, FlatQuantizer};
 use lance_index::vector::hnsw::HNSW;
 use lance_index::vector::ivf::builder::recommended_num_partitions;
@@ -73,6 +75,7 @@ pub enum StageParams {
     PQ(PQBuildParams),
     SQ(SQBuildParams),
     RQ(RQBuildParams),
+    TQ(TurboBuildParams),
 }
 
 // The version of the index file.
@@ -247,6 +250,20 @@ impl VectorIndexParams {
         }
     }
 
+    pub fn with_ivf_tq_params(
+        metric_type: MetricType,
+        ivf: IvfBuildParams,
+        tq: TurboBuildParams,
+    ) -> Self {
+        let stages = vec![StageParams::Ivf(ivf), StageParams::TQ(tq)];
+        Self {
+            stages,
+            metric_type,
+            version: IndexFileVersion::V3,
+            skip_transpose: false,
+        }
+    }
+
     pub fn ivf_hnsw(
         distance_type: DistanceType,
         ivf: IvfBuildParams,
@@ -311,6 +328,7 @@ impl VectorIndexParams {
             (2, _, Some(StageParams::PQ(_))) => IndexType::IvfPq,
             (2, _, Some(StageParams::SQ(_))) => IndexType::IvfSq,
             (2, _, Some(StageParams::RQ(_))) => IndexType::IvfRq,
+            (2, _, Some(StageParams::TQ(_))) => IndexType::IvfTq,
             (2, _, Some(StageParams::Hnsw(_))) => IndexType::IvfHnswFlat,
             (3, Some(StageParams::Hnsw(_)), Some(StageParams::PQ(_))) => IndexType::IvfHnswPq,
             (3, Some(StageParams::Hnsw(_)), Some(StageParams::SQ(_))) => IndexType::IvfHnswSq,
@@ -684,7 +702,7 @@ pub(crate) async fn build_distributed_vector_index(
             .await?;
         }
 
-        IndexType::IvfRq => {
+        IndexType::IvfRq | IndexType::IvfTq => {
             return Err(Error::index(format!(
                 "Build Distributed Vector Index: invalid index type: {:?} \
             is not supported in distributed mode; skipping this shard",
@@ -849,6 +867,32 @@ pub(crate) async fn build_vector_index(
                 shuffler,
                 Some(ivf_params),
                 Some(rq_params.clone()),
+                (),
+                frag_reuse_index,
+            )?;
+
+            builder
+                .with_transpose(!params.skip_transpose)
+                .with_progress(progress.clone())
+                .build()
+                .await?;
+        }
+        IndexType::IvfTq => {
+            let StageParams::TQ(tq_params) = &stages[1] else {
+                return Err(Error::index(format!(
+                    "Build Vector Index: invalid stages: {:?}",
+                    stages
+                )));
+            };
+
+            let mut builder = IvfIndexBuilder::<FlatIndex, TurboQuantizer>::new(
+                dataset.clone(),
+                column.to_owned(),
+                dataset.indices_dir().child(uuid),
+                params.metric_type,
+                shuffler,
+                Some(ivf_params),
+                Some(tq_params.clone()),
                 (),
                 frag_reuse_index,
             )?;
@@ -1117,6 +1161,26 @@ pub(crate) async fn build_vector_index_incremental(
                 .build()
                 .await?;
         }
+        // IVF_TQ
+        (SubIndexType::Flat, QuantizationType::Turbo) => {
+            let mut builder = IvfIndexBuilder::<FlatIndex, TurboQuantizer>::new_incremental(
+                dataset.clone(),
+                column.to_owned(),
+                index_dir,
+                params.metric_type,
+                shuffler,
+                (),
+                frag_reuse_index,
+                OptimizeOptions::append(),
+            )?;
+            builder
+                .with_ivf(ivf_model)
+                .with_quantizer(quantizer.try_into()?)
+                .with_transpose(!params.skip_transpose)
+                .with_progress(progress.clone())
+                .build()
+                .await?;
+        }
         // IVF_HNSW variants
         (SubIndexType::Hnsw, quantization_type) => {
             let StageParams::Hnsw(hnsw_params) = &stages[1] else {
@@ -1181,6 +1245,11 @@ pub(crate) async fn build_vector_index_incremental(
                 QuantizationType::Rabit => {
                     return Err(Error::index(
                         "Rabit quantization is not supported for HNSW index".to_string(),
+                    ));
+                }
+                QuantizationType::Turbo => {
+                    return Err(Error::index(
+                        "Turbo quantization is not supported for HNSW index".to_string(),
                     ));
                 }
             }
@@ -1493,6 +1562,11 @@ pub async fn initialize_vector_index(
             let rabit_params = derive_rabit_params(&rabit_quantizer);
             VectorIndexParams::with_ivf_rq_params(metric_type, ivf_params, rabit_params)
         }
+        (SubIndexType::Flat, QuantizationType::Turbo) => {
+            let turbo_quantizer: TurboQuantizer = quantizer.try_into()?;
+            let turbo_params = derive_turbo_params(&turbo_quantizer);
+            VectorIndexParams::with_ivf_tq_params(metric_type, ivf_params, turbo_params)
+        }
         (SubIndexType::Hnsw, quantization_type) => {
             let hnsw_params = derive_hnsw_params(source_vector_index.as_ref());
             match quantization_type {
@@ -1522,6 +1596,11 @@ pub async fn initialize_vector_index(
                 QuantizationType::Rabit => {
                     return Err(Error::index(
                         "Rabit quantization is not supported for HNSW index".to_string(),
+                    ));
+                }
+                QuantizationType::Turbo => {
+                    return Err(Error::index(
+                        "Turbo quantization is not supported for HNSW index".to_string(),
                     ));
                 }
             }
@@ -1633,6 +1712,14 @@ fn derive_rabit_params(rabit_quantizer: &RabitQuantizer) -> RQBuildParams {
     RQBuildParams {
         num_bits: rabit_quantizer.num_bits(),
         rotation_type: rabit_quantizer.rotation_type(),
+    }
+}
+
+/// Create Turbo build parameters from a TurboQuantizer
+fn derive_turbo_params(turbo_quantizer: &TurboQuantizer) -> TurboBuildParams {
+    TurboBuildParams {
+        num_bits: turbo_quantizer.num_bits(),
+        seed: turbo_quantizer.seed(),
     }
 }
 

@@ -53,6 +53,7 @@ use lance_index::metrics::MetricsCollector;
 use lance_index::metrics::NoOpMetricsCollector;
 use lance_index::vector::DISTANCE_TYPE_KEY;
 use lance_index::vector::bq::builder::RabitQuantizer;
+use lance_index::vector::turbo::builder::TurboQuantizer;
 use lance_index::vector::flat::index::{FlatBinQuantizer, FlatIndex, FlatQuantizer};
 use lance_index::vector::hnsw::HnswMetadata;
 use lance_index::vector::hnsw::builder::HNSW_METADATA_KEY;
@@ -1543,6 +1544,13 @@ pub(crate) async fn remap_index_file_v3(
             .remap(mapping)
             .await
         }
+        (SubIndexType::Flat, QuantizationType::Turbo) => {
+            IvfIndexBuilder::<FlatIndex, TurboQuantizer>::new_remapper(
+                dataset, column, index_dir, index,
+            )?
+            .remap(mapping)
+            .await
+        }
         (SubIndexType::Hnsw, QuantizationType::Flat) => {
             IvfIndexBuilder::<HNSW, FlatQuantizer>::new_remapper(dataset, column, index_dir, index)?
                 .remap(mapping)
@@ -1570,6 +1578,9 @@ pub(crate) async fn remap_index_file_v3(
             .remap(mapping)
             .await
         }
+        (SubIndexType::Hnsw, QuantizationType::Turbo) => Err(Error::index(
+            "Turbo quantization is not supported for HNSW index".to_string(),
+        )),
     }
 }
 

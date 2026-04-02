@@ -11,6 +11,7 @@ import pyarrow as pa
 
 from lance.indices.ivf import IvfModel
 from lance.indices.pq import PqModel
+from lance.indices.tq import TqModel
 
 if TYPE_CHECKING:
     import torch
@@ -202,6 +203,64 @@ class IndicesBuilder:
             ivf_model.centroids,
         )
         return PqModel(num_subvectors, pq_codebook)
+
+    def train_tq(
+        self,
+        num_bits: int = 4,
+        *,
+        seed: int = 42,
+    ) -> TqModel:
+        """
+        Train a TurboQuant model for a given column.
+
+        TurboQuant is data-oblivious: no training data is needed.
+        The codebook is determined solely by ``(dimension, num_bits)`` and
+        the rotation matrix by ``(dimension, seed)``. This completes in
+        under 1 millisecond regardless of dataset size.
+
+        Compare with :meth:`train_pq` which requires sampling data and running
+        k-means (minutes at large scale).
+
+        Parameters
+        ----------
+
+        num_bits: int
+            Bit-width per coordinate (1-8). Default: 4.
+
+            - 1-bit: 31x compression, ~70% recall@1 (very aggressive)
+            - 2-bit: 16x compression, ~85% recall@1
+            - 4-bit: 8x compression, ~95% recall@1 (recommended)
+            - 8-bit: 4x compression, ~99% recall@1 (equivalent to SQ)
+
+            These recall numbers are for d=1536 on DBpedia-OpenAI (paper Fig. 5).
+        seed: int
+            RNG seed for rotation matrix reproducibility. Default: 42.
+            Using the same seed on different machines produces identical
+            rotation matrices, enabling deterministic distributed builds.
+
+        Returns
+        -------
+        TqModel
+            The trained model containing the rotation matrix and parameters.
+            Can be serialized with :meth:`TqModel.save` for distributed builds.
+
+        Examples
+        --------
+        >>> builder = IndicesBuilder(ds, "vector")
+        >>> ivf = builder.train_ivf(num_partitions=256)
+        >>> tq = builder.train_tq(num_bits=4)
+        >>> # For distributed: broadcast ivf and tq to workers
+        >>> tq.save("tq_model.lance")
+        """
+        from lance.lance import indices
+
+        tq_model = indices.train_tq_model(
+            self.dimension,
+            num_bits,
+            seed,
+        )
+        rotation_matrix = tq_model.rotation_matrix
+        return TqModel(rotation_matrix, num_bits, seed, self.dimension)
 
     def prepare_global_ivf_pq(
         self,

@@ -1911,8 +1911,8 @@ impl Dataset {
             "LABEL_LIST" => IndexType::LabelList,
             "RTREE" => IndexType::RTree,
             "INVERTED" | "FTS" => IndexType::Inverted,
-            "IVF_FLAT" | "IVF_PQ" | "IVF_SQ" | "IVF_RQ" | "IVF_HNSW_FLAT" | "IVF_HNSW_PQ"
-            | "IVF_HNSW_SQ" => IndexType::Vector,
+            "IVF_FLAT" | "IVF_PQ" | "IVF_SQ" | "IVF_RQ" | "IVF_TQ" | "IVF_HNSW_FLAT"
+            | "IVF_HNSW_PQ" | "IVF_HNSW_SQ" => IndexType::Vector,
             _ => {
                 return Err(PyValueError::new_err(format!(
                     "Index type '{index_type}' is not supported."
@@ -3464,6 +3464,21 @@ fn prepare_vector_index_params(
         "IVF_RQ" => Ok(Box::new(VectorIndexParams::with_ivf_rq_params(
             m_type, ivf_params, rq_params,
         ))),
+
+        "IVF_TQ" => {
+            let mut tq_params = lance_index::vector::turbo::TurboBuildParams::default();
+            if let Some(kwargs) = kwargs {
+                if let Some(num_bits) = kwargs.get_item("num_bits")? {
+                    tq_params.num_bits = num_bits.extract()?;
+                }
+                if let Some(seed) = kwargs.get_item("seed")? {
+                    tq_params.seed = seed.extract()?;
+                }
+            }
+            Ok(Box::new(VectorIndexParams::with_ivf_tq_params(
+                m_type, ivf_params, tq_params,
+            )))
+        }
 
         "IVF_HNSW_FLAT" => Ok(Box::new(VectorIndexParams::ivf_hnsw(
             m_type,

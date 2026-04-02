@@ -25,6 +25,7 @@ use super::pq::ProductQuantizer;
 use super::{ivf::storage::IvfModel, sq::ScalarQuantizer, storage::VectorStore};
 use crate::frag_reuse::FragReuseIndex;
 use crate::vector::bq::builder::RabitQuantizer;
+use crate::vector::turbo::builder::TurboQuantizer;
 use crate::{INDEX_METADATA_SCHEMA_KEY, IndexMetadata};
 
 pub trait Quantization:
@@ -68,6 +69,7 @@ pub enum QuantizationType {
     Product,
     Scalar,
     Rabit,
+    Turbo,
 }
 
 impl FromStr for QuantizationType {
@@ -79,6 +81,7 @@ impl FromStr for QuantizationType {
             "PQ" => Ok(Self::Product),
             "SQ" => Ok(Self::Scalar),
             "RABIT" => Ok(Self::Rabit),
+            "TQ" | "TURBO" => Ok(Self::Turbo),
             _ => Err(Error::index(format!("Unknown quantization type: {}", s))),
         }
     }
@@ -91,6 +94,7 @@ impl std::fmt::Display for QuantizationType {
             Self::Product => write!(f, "PQ"),
             Self::Scalar => write!(f, "SQ"),
             Self::Rabit => write!(f, "RQ"),
+            Self::Turbo => write!(f, "TQ"),
         }
     }
 }
@@ -120,6 +124,7 @@ pub enum Quantizer {
     Product(ProductQuantizer),
     Scalar(ScalarQuantizer),
     Rabit(RabitQuantizer),
+    Turbo(TurboQuantizer),
 }
 
 impl Quantizer {
@@ -130,6 +135,7 @@ impl Quantizer {
             Self::Product(pq) => pq.code_dim(),
             Self::Scalar(sq) => sq.code_dim(),
             Self::Rabit(rq) => rq.code_dim(),
+            Self::Turbo(tq) => tq.code_dim(),
         }
     }
 
@@ -140,6 +146,7 @@ impl Quantizer {
             Self::Product(pq) => pq.column(),
             Self::Scalar(sq) => sq.column(),
             Self::Rabit(rq) => rq.column(),
+            Self::Turbo(tq) => tq.column(),
         }
     }
 
@@ -150,6 +157,7 @@ impl Quantizer {
             Self::Product(_) => ProductQuantizer::metadata_key(),
             Self::Scalar(_) => ScalarQuantizer::metadata_key(),
             Self::Rabit(_) => RabitQuantizer::metadata_key(),
+            Self::Turbo(_) => TurboQuantizer::metadata_key(),
         }
     }
 
@@ -160,6 +168,7 @@ impl Quantizer {
             Self::Product(_) => QuantizationType::Product,
             Self::Scalar(_) => QuantizationType::Scalar,
             Self::Rabit(_) => QuantizationType::Rabit,
+            Self::Turbo(_) => QuantizationType::Turbo,
         }
     }
 
@@ -170,6 +179,7 @@ impl Quantizer {
             Self::Product(pq) => serde_json::to_value(pq.metadata(args))?,
             Self::Scalar(sq) => serde_json::to_value(sq.metadata(args))?,
             Self::Rabit(rq) => serde_json::to_value(rq.metadata(args))?,
+            Self::Turbo(tq) => serde_json::to_value(tq.metadata(args))?,
         };
         Ok(metadata)
     }

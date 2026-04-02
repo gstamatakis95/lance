@@ -17,6 +17,7 @@ use lance_index::vector::ivf::shuffler::{IvfShuffler, shuffle_vectors};
 use lance_index::vector::{
     ivf::{IvfBuildParams, storage::IvfModel},
     pq::{PQBuildParams, ProductQuantizer},
+    turbo::{TurboBuildParams, builder::TurboQuantizer},
 };
 use lance_linalg::distance::DistanceType;
 use pyo3::Bound;
@@ -686,6 +687,52 @@ impl PyIndexDescription {
     }
 }
 
+#[pyclass(name = "TqModel", module = "lance.indices")]
+#[derive(Debug, Clone)]
+pub struct PyTqModel {
+    pub(crate) inner: TurboQuantizer,
+}
+
+#[pymethods]
+impl PyTqModel {
+    #[getter]
+    fn rotation_matrix<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        if let Some(rotate_mat) = self.inner.rotation_matrix() {
+            let data = rotate_mat.clone().into_data();
+            Ok(Some(data.to_pyarrow(py)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[getter]
+    fn num_bits(&self) -> u32 {
+        self.inner.num_bits()
+    }
+
+    #[getter]
+    fn seed(&self) -> u64 {
+        self.inner.seed()
+    }
+}
+
+/// Train a TurboQuant model (data-oblivious, deterministic).
+///
+/// This is near-instant since TurboQuant doesn't need any training data.
+/// The codebook is determined solely by (dimension, num_bits).
+/// Only the rotation matrix needs to be generated (seeded RNG).
+#[pyfunction]
+fn train_tq_model(
+    py: Python<'_>,
+    dimension: usize,
+    num_bits: u32,
+    seed: u64,
+) -> PyResult<Py<PyTqModel>> {
+    let params = TurboBuildParams { num_bits, seed };
+    let tq = TurboQuantizer::new(dimension, &params).infer_error()?;
+    Py::new(py, PyTqModel { inner: tq })
+}
+
 pub fn register_indices(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let indices = PyModule::new(py, "indices")?;
     indices.add_wrapped(wrap_pyfunction!(train_ivf_model))?;
@@ -700,6 +747,8 @@ pub fn register_indices(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     indices.add_class::<PyIndexDescription>()?;
     indices.add_class::<PyIndexSegmentDescription>()?;
     indices.add_wrapped(wrap_pyfunction!(get_ivf_model))?;
+    indices.add_wrapped(wrap_pyfunction!(train_tq_model))?;
+    indices.add_class::<PyTqModel>()?;
     m.add_submodule(&indices)?;
     Ok(())
 }

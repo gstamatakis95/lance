@@ -171,5 +171,9 @@ required-features = ["geo"]
 name = "residual_transform"
 harness = false
 
+[[bench]]
+name = "tq"
+harness = false
+
 [lints]
 workspace = true
